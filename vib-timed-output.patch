@@ -1,0 +1,107 @@
+--- a/drivers/leds/leds-qpnp-haptics.c
++++ b/drivers/leds/leds-qpnp-haptics.c
+@@ -20,6 +20,10 @@
+ #include <linux/kernel.h>
+ #include <linux/log2.h>
+ #include <linux/leds.h>
++#if IS_ENABLED(CONFIG_ANDROID_TIMED_OUTPUT)
++#include <linux/timed_output.h>
++#include <linux/hrtimer.h>
++#endif
+ #include <linux/module.h>
+ #include <linux/of_device.h>
+ #include <linux/platform_device.h>
+@@ -2418,6 +2422,75 @@
+ 	return rc;
+ }
+ 
++#if IS_ENABLED(CONFIG_ANDROID_TIMED_OUTPUT)
++/*
++ * MIUI msm8998 vibrator HAL only knows the old timed_output interface:
++ *   /sys/devices/virtual/timed_output/vibrator/{enable,...}
++ * Register one here that drives the same chip play path.
++ */
++static struct timed_output_dev qpnp_hap_tdev;
++static struct hap_chip *tdev_chip;
++
++static void qpnp_hap_tdev_enable(struct timed_output_dev *dev, int timeout)
++{
++	struct hap_chip *chip = tdev_chip;
++
++	if (!chip)
++		return;
++
++	if (timeout > 0) {
++		mutex_lock(&chip->param_lock);
++		chip->play_time_ms = timeout;
++		mutex_unlock(&chip->param_lock);
++
++		hrtimer_cancel(&chip->stop_timer);
++		if (is_sw_lra_auto_resonance_control(chip))
++			hrtimer_cancel(&chip->auto_res_err_poll_timer);
++		cancel_work_sync(&chip->haptics_work);
++
++		atomic_set(&chip->state, 1);
++		schedule_work(&chip->haptics_work);
++	} else {
++		hrtimer_cancel(&chip->stop_timer);
++		atomic_set(&chip->state, 0);
++		schedule_work(&chip->haptics_work);
++	}
++}
++
++static int qpnp_hap_tdev_get_time(struct timed_output_dev *dev)
++{
++	ktime_t time_rem;
++	s64 time_us = 0;
++
++	if (!tdev_chip)
++		return 0;
++	if (hrtimer_active(&tdev_chip->stop_timer)) {
++		time_rem = hrtimer_get_remaining(&tdev_chip->stop_timer);
++		time_us = ktime_to_us(time_rem);
++	}
++	return div_s64(time_us, 1000);
++}
++
++static void qpnp_hap_tdev_register(struct hap_chip *chip)
++{
++	tdev_chip = chip;
++	qpnp_hap_tdev.name = "vibrator";
++	qpnp_hap_tdev.enable = qpnp_hap_tdev_enable;
++	qpnp_hap_tdev.get_time = qpnp_hap_tdev_get_time;
++	if (timed_output_dev_register(&qpnp_hap_tdev))
++		pr_err("qpnp-haptics: timed_output registration failed\n");
++}
++
++static void qpnp_hap_tdev_unregister(void)
++{
++	timed_output_dev_unregister(&qpnp_hap_tdev);
++	tdev_chip = NULL;
++}
++#else
++static void qpnp_hap_tdev_register(struct hap_chip *chip) {}
++static void qpnp_hap_tdev_unregister(void) {}
++#endif
++
+ static int qpnp_haptics_probe(struct platform_device *pdev)
+ {
+ 	struct hap_chip *chip;
+@@ -2481,6 +2554,8 @@
+ 		}
+ 	}
+ 
++	qpnp_hap_tdev_register(chip);
++
+ 	return 0;
+ 
+ sysfs_fail:
+@@ -2503,6 +2578,8 @@
+ static int qpnp_haptics_remove(struct platform_device *pdev)
+ {
+ 	struct hap_chip *chip = dev_get_drvdata(&pdev->dev);
++
++	qpnp_hap_tdev_unregister();
+ 
+ 	cancel_work_sync(&chip->haptics_work);
+ 	hrtimer_cancel(&chip->auto_res_err_poll_timer);

@@ -1,0 +1,18 @@
+# BakaSU (ReSukiSU) v4.2.0-rc3 fragment for chiron (msm8998, 4.4 non-GKI)
+# Apply on top of arch/arm64/configs/chiron_defconfig:
+#   make O=out ARCH=arm64 chiron_defconfig
+#   cat ksu.fragment >> out/.config
+#   make O=out ARCH=arm64 olddefconfig
+CONFIG_KSU=y
+# CONFIG_KSU_DEBUG is not set
+# CONFIG_KSU_TOOLKIT_SUPPORT is not set
+CONFIG_KSU_MANUAL_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_SETUID_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_INITRC_HOOK=y
+CONFIG_KSU_MANUAL_HOOK_AUTO_INPUT_HOOK=y
+# tracepoint hook is GKI-2.0-only; must stay off on 4.4
+# CONFIG_KSU_TRACEPOINT_HOOK is not set
+# COMPAT_VDSO needs a 32-bit ARM toolchain; stock chiron kernel ships without it too
+# CONFIG_COMPAT_VDSO is not set
+# tons of clang-19 warnings on this old tree; keep them as warnings
+# CONFIG_CC_WERROR is not set
